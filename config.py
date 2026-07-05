@@ -86,3 +86,37 @@ PREDICTION_DIR = os.path.join(OUTPUT_DIR, "predictions")
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(PREDICTION_DIR, exist_ok=True)
+
+
+
+# =====================================
+# Scheduler
+# =====================================
+
+T_MAX = 50
+
+MIN_LR = 1e-6
+
+# =====================================
+# Mixed Precision
+# =====================================
+
+USE_AMP = True
+
+# =====================================
+# Gradient Clipping
+# =====================================
+
+GRAD_CLIP = 1.0
+
+# =====================================
+# Early Stopping
+# =====================================
+
+PATIENCE = 10
+
+# =====================================
+# Checkpoints
+# =====================================
+
+SAVE_BEST_ONLY = True

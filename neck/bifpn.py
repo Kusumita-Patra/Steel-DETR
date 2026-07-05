@@ -2,9 +2,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
+# ==========================================================
+# Squeeze-and-Excitation Block
+# ==========================================================
+
 class SEBlock(nn.Module):
     """
-    Squeeze-and-Excitation Block
+    Channel Attention using Squeeze-and-Excitation.
     """
 
     def __init__(self, channels, reduction=16):
@@ -21,7 +26,7 @@ class SEBlock(nn.Module):
 
     def forward(self, x):
 
-        b, c, _, _ = x.shape
+        b, c, _, _ = x.size()
 
         y = self.pool(x).view(b, c)
 
@@ -29,6 +34,10 @@ class SEBlock(nn.Module):
 
         return x * y
 
+
+# ==========================================================
+# Depthwise Separable Convolution
+# ==========================================================
 
 class SeparableConvBlock(nn.Module):
     """
@@ -46,6 +55,7 @@ class SeparableConvBlock(nn.Module):
             channels,
             channels,
             kernel_size=3,
+            stride=1,
             padding=1,
             groups=channels,
             bias=False
@@ -82,53 +92,117 @@ class SeparableConvBlock(nn.Module):
 
         return x
 
+
+# ==========================================================
+# Learnable Weighted Feature Fusion
+# ==========================================================
+
 class WeightedFusion(nn.Module):
     """
-    Learnable weighted feature fusion
+    Fast normalized learnable fusion.
     """
 
     def __init__(self, num_inputs):
         super().__init__()
 
-        self.weights = nn.Parameter(torch.ones(num_inputs))
-
-        self.eps = 1e-4
+        self.weights = nn.Parameter(
+            torch.ones(num_inputs),
+            requires_grad=True
+        )
 
     def forward(self, features):
 
         weights = torch.softmax(self.weights, dim=0)
 
-        weights = weights / (weights.sum() + self.eps)
-
-        out = 0
+        fused = 0
 
         for w, f in zip(weights, features):
-            out = out + w * f
+            fused += w * f
 
-        return sum(w * f for w, f in zip(weights, features))
+        return fused
 
+# ==========================================================
+# Backbone Feature Projection
+# ==========================================================
 
-class BiFPNBlock(nn.Module):
+class ProjectionLayer(nn.Module):
+    """
+    Projects ResNet backbone feature maps to a common channel dimension.
+
+    Input:
+        c2 : [B, 256, H/4,  W/4]
+        c3 : [B, 512, H/8,  W/8]
+        c4 : [B,1024, H/16, W/16]
+        c5 : [B,2048, H/32, W/32]
+
+    Output:
+        p2, p3, p4, p5 : all with `channels` feature maps
+    """
 
     def __init__(self, channels=256):
         super().__init__()
 
-        # Projection
-        self.c2_proj = nn.Conv2d(256, channels, 1)
-        self.c3_proj = nn.Conv2d(512, channels, 1)
-        self.c4_proj = nn.Conv2d(1024, channels, 1)
-        self.c5_proj = nn.Conv2d(2048, channels, 1)
+        self.p2_proj = nn.Sequential(
+            nn.Conv2d(256, channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(channels)
+        )
 
-        # Fusion weights
-        self.fuse_p4 = WeightedFusion(2)
-        self.fuse_p3 = WeightedFusion(2)
-        self.fuse_p2 = WeightedFusion(2)
+        self.p3_proj = nn.Sequential(
+            nn.Conv2d(512, channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(channels)
+        )
 
-        self.fuse_p3_out = WeightedFusion(2)
-        self.fuse_p4_out = WeightedFusion(2)
+        self.p4_proj = nn.Sequential(
+            nn.Conv2d(1024, channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(channels)
+        )
+
+        self.p5_proj = nn.Sequential(
+            nn.Conv2d(2048, channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(channels)
+        )
+
+    def forward(self, features):
+
+        return {
+            "p2": self.p2_proj(features["c2"]),
+            "p3": self.p3_proj(features["c3"]),
+            "p4": self.p4_proj(features["c4"]),
+            "p5": self.p5_proj(features["c5"]),
+        }
+
+# ==========================================================
+# BiFPN Layer
+# ==========================================================
+
+class BiFPNLayer(nn.Module):
+    """
+    One complete BiFPN Layer.
+
+    Input:
+        p2, p3, p4, p5
+
+    Performs:
+        1. Top-down pathway
+        2. Bottom-up pathway
+        3. Weighted feature fusion
+        4. Separable convolutions
+    """
+
+    def __init__(self, channels=256):
+        super().__init__()
+
+        # ---------- Top-Down Fusion ----------
+        self.fuse_p4_td = WeightedFusion(2)
+        self.fuse_p3_td = WeightedFusion(2)
+        self.fuse_p2_td = WeightedFusion(2)
+
+        # ---------- Bottom-Up Fusion ----------
+        self.fuse_p3_out = WeightedFusion(3)
+        self.fuse_p4_out = WeightedFusion(3)
         self.fuse_p5_out = WeightedFusion(2)
 
-        # Convolutions
+        # ---------- Convolutions ----------
         self.conv_p2 = SeparableConvBlock(channels)
         self.conv_p3 = SeparableConvBlock(channels)
         self.conv_p4 = SeparableConvBlock(channels)
@@ -136,102 +210,97 @@ class BiFPNBlock(nn.Module):
 
     def forward(self, features):
 
-        c2 = self.c2_proj(features["c2"])
-        c3 = self.c3_proj(features["c3"])
-        c4 = self.c4_proj(features["c4"])
-        c5 = self.c5_proj(features["c5"])
+        p2 = features["p2"]
+        p3 = features["p3"]
+        p4 = features["p4"]
+        p5 = features["p5"]
 
-        # -------------------------
-        # Top-Down Path
-        # -------------------------
+        # =====================================================
+        # Top-Down Pathway
+        # =====================================================
 
-        p5 = c5
+        p5_td = p5
 
-        p4 = self.fuse_p4([
-            c4,
-            F.interpolate(
-                p5,
-                size=c4.shape[-2:],
-                mode="nearest"
-            )
-        ])
-        p4 = self.conv_p4(p4)
-
-        p3 = self.fuse_p3([
-            c3,
-            F.interpolate(
-                p4,
-                size=c3.shape[-2:],
-                mode="nearest"
-            )
-        ])
-        p3 = self.conv_p3(p3)
-
-        p2 = self.fuse_p2([
-            c2,
-            F.interpolate(
-                p3,
-                size=c2.shape[-2:],
-                mode="nearest"
-            )
-        ])
-        p2 = self.conv_p2(p2)
-
-        # -------------------------
-        # Bottom-Up Path
-        # -------------------------
-
-        p3 = self.fuse_p3_out([
-            p3,
-            F.max_pool2d(p2, 2)
-        ])
-        p3 = self.conv_p3(p3)
-
-        p4 = self.fuse_p4_out([
+        p4_td = self.fuse_p4_td([
             p4,
-            F.max_pool2d(p3, 2)
+            F.interpolate(
+                p5_td,
+                size=p4.shape[-2:],
+                mode="nearest"
+            )
         ])
-        p4 = self.conv_p4(p4)
+        p4_td = self.conv_p4(p4_td)
 
-        p5 = self.fuse_p5_out([
-            p5,
-            F.max_pool2d(p4, 2)
+        p3_td = self.fuse_p3_td([
+            p3,
+            F.interpolate(
+                p4_td,
+                size=p3.shape[-2:],
+                mode="nearest"
+            )
         ])
-        p5 = self.conv_p5(p5)
+        p3_td = self.conv_p3(p3_td)
+
+        p2_td = self.fuse_p2_td([
+            p2,
+            F.interpolate(
+                p3_td,
+                size=p2.shape[-2:],
+                mode="nearest"
+            )
+        ])
+        p2_td = self.conv_p2(p2_td)
+
+        # =====================================================
+        # Bottom-Up Pathway
+        # =====================================================
+
+        p3_out = self.fuse_p3_out([
+            p3,
+            p3_td,
+            F.max_pool2d(p2_td, kernel_size=2)
+        ])
+        p3_out = self.conv_p3(p3_out)
+
+        p4_out = self.fuse_p4_out([
+            p4,
+            p4_td,
+            F.max_pool2d(p3_out, kernel_size=2)
+        ])
+        p4_out = self.conv_p4(p4_out)
+
+        p5_out = self.fuse_p5_out([
+            p5,
+            F.max_pool2d(p4_out, kernel_size=2)
+        ])
+        p5_out = self.conv_p5(p5_out)
 
         return {
-            "p2": p2,
-            "p3": p3,
-            "p4": p4,
-            "p5": p5,
+            "p2": p2_td,
+            "p3": p3_out,
+            "p4": p4_out,
+            "p5": p5_out,
         }
+# ==========================================================
+# BiFPN Wrapper (Stacked Layers)
+# ==========================================================
 
 
 class BiFPN(nn.Module):
-    """
-    Stack multiple BiFPN blocks
-    """
 
-    def __init__(
-        self,
-        channels=256,
-        num_layers=3
-    ):
+    def __init__(self, channels=256, num_layers=3):
         super().__init__()
 
-        self.layers = nn.ModuleList()
+        self.projection = ProjectionLayer(channels)
 
-        self.layers.append(BiFPNBlock(channels))
-
-        for _ in range(num_layers - 1):
-
-            self.layers.append(
-                FeatureBiFPN(channels)
-            )
+        self.layers = nn.ModuleList([
+            BiFPNLayer(channels)
+            for _ in range(num_layers)
+        ])
 
     def forward(self, features):
 
-        x = features
+        x = self.projection(features)
 
         for layer in self.layers:
             x = layer(x)
@@ -239,30 +308,3 @@ class BiFPN(nn.Module):
         return x
 
 
-class FeatureBiFPN(nn.Module):
-    """
-    Additional BiFPN blocks operating
-    directly on P2-P5.
-    """
-
-    def __init__(self, channels):
-        super().__init__()
-
-        self.conv2 = SeparableConvBlock(channels)
-        self.conv3 = SeparableConvBlock(channels)
-        self.conv4 = SeparableConvBlock(channels)
-        self.conv5 = SeparableConvBlock(channels)
-
-    def forward(self, features):
-
-        p2 = self.conv2(features["p2"]) + features["p2"]
-        p3 = self.conv2(features["p3"]) + features["p3"]
-        p4 = self.conv2(features["p4"]) + features["p4"]
-        p5 = self.conv2(features["p5"]) + features["p5"]
-
-        return {
-            "p2": p2,
-            "p3": p3,
-            "p4": p4,
-            "p5": p5,
-        }

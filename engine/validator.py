@@ -61,4 +61,8 @@ class Validator:
 
         avg_loss = running_loss / len(self.val_loader)
 
-        return avg_loss, metrics
+        avg_loss = running_loss / len(self.val_loader)
+
+        metrics = compute_metrics(all_labels, all_preds)
+
+        return avg_loss, metrics["accuracy"], metrics

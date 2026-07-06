@@ -99,8 +99,13 @@ def main():
         val_loss, val_acc = validator.validate()
 
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
-        print(f"Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.4f}")
-
+        print(
+          f"Val Loss: {val_loss:.4f} | "
+          f"Acc: {val_acc['accuracy']:.4f} | "
+          f"F1: {val_acc['f1']:.4f} | "
+          f"Prec: {val_acc['precision']:.4f} | "
+          f"Rec: {val_acc['recall']:.4f}"
+        )
         scheduler.step()
 
         # Save best model

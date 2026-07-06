@@ -13,7 +13,7 @@ class ResNet50Backbone(nn.Module):
         else:
           weights = None
 
-resnet = resnet50(weights=weights)
+        resnet = resnet50(weights=weights)
 
         # Remove fully connected + avgpool
         self.stage0 = nn.Sequential(

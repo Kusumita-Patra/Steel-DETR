@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Training outputs
+outputs/
+
+# PyTorch
+*.pth
+*.pt
+
+# Logs
+runs/
+logs/
+
+# OS
+.DS_Store

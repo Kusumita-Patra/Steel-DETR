@@ -5,9 +5,13 @@ from backbone.resnet50 import ResNet50Backbone
 from neck.bifpn import BiFPN
 
 
+# ==========================================================
+# Feature-Level Attention
+# ==========================================================
+
 class FeatureAttention(nn.Module):
     """
-    Learns an importance weight for each BiFPN feature level.
+    Learns how much each pyramid level contributes.
     """
 
     def __init__(self, channels=256, num_levels=4):
@@ -29,10 +33,16 @@ class FeatureAttention(nn.Module):
         weighted = []
 
         for i in range(len(features)):
-            weighted.append(features[i] * weights[:, i].unsqueeze(1))
+            weighted.append(
+                features[i] * weights[:, i].unsqueeze(1)
+            )
 
         return torch.cat(weighted, dim=1)
 
+
+# ==========================================================
+# Steel Surface Defect Classifier
+# ==========================================================
 
 class SteelClassifier(nn.Module):
 
@@ -40,16 +50,18 @@ class SteelClassifier(nn.Module):
         self,
         num_classes=10,
         bifpn_channels=256,
-        num_bifpn_layers=2,
+        num_bifpn_layers=3,
         dropout=0.3,
-        pretrained=True
+        pretrained=True,
     ):
         super().__init__()
 
         # Backbone
-        self.backbone = ResNet50Backbone(pretrained=pretrained)
+        self.backbone = ResNet50Backbone(
+            pretrained=pretrained
+        )
 
-        # BiFPN
+        # Neck
         self.neck = BiFPN(
             channels=bifpn_channels,
             num_layers=num_bifpn_layers
@@ -69,13 +81,19 @@ class SteelClassifier(nn.Module):
 
             nn.Dropout(dropout),
 
-            nn.Linear(bifpn_channels * 4, 512),
+            nn.Linear(
+                bifpn_channels * 4,
+                512
+            ),
 
             nn.ReLU(inplace=True),
 
             nn.Dropout(dropout),
 
-            nn.Linear(512, num_classes)
+            nn.Linear(
+                512,
+                num_classes
+            )
         )
 
     def forward(self, x):
@@ -90,16 +108,16 @@ class SteelClassifier(nn.Module):
 
         for level in ["p2", "p3", "p4", "p5"]:
 
-            feat = self.pool(pyramid[level])
+            feat = self.pool(
+                pyramid[level]
+            )
 
             feat = feat.flatten(1)
 
             pooled.append(feat)
 
-        # Attention-based fusion
         fused = self.feature_attention(pooled)
 
-        # Classification
         logits = self.classifier(fused)
 
         return logits

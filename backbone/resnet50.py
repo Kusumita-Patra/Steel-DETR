@@ -1,13 +1,19 @@
 import torch
 import torch.nn as nn
 import torchvision.models as models
+from torchvision.models import resnet50, ResNet50_Weights
 
 
 class ResNet50Backbone(nn.Module):
     def __init__(self, pretrained=True):
         super().__init__()
 
-        resnet = models.resnet50(pretrained=pretrained)
+        if pretrained:
+          weights = ResNet50_Weights.IMAGENET1K_V2
+        else:
+          weights = None
+
+resnet = resnet50(weights=weights)
 
         # Remove fully connected + avgpool
         self.stage0 = nn.Sequential(

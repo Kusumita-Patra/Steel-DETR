@@ -87,7 +87,6 @@ class Trainer:
 
             running_loss += loss.item() * labels.size(0)
             
-            epoch_loss = running_loss / total
 
             preds = outputs.argmax(dim=1)
 
@@ -109,7 +108,7 @@ class Trainer:
 
             self.scheduler.step()
 
-        epoch_loss = running_loss / len(self.train_loader)
+        epoch_loss = running_loss / total
 
         epoch_acc = correct / total
 

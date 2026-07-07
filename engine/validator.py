@@ -44,8 +44,6 @@ class Validator:
 
             running_loss += loss.item() * labels.size(0)
 
-            avg_loss = running_loss / len(self.val_loader.dataset)
-
             preds = torch.argmax(outputs, dim=1)
 
             all_preds.extend(preds.cpu().numpy())
@@ -59,7 +57,7 @@ class Validator:
       # -------------------------
       # Metrics
       # -------------------------
-        avg_loss = running_loss / len(self.val_loader)
+        avg_loss = running_loss / len(self.val_loader.dataset)
 
         metrics = compute_metrics(all_labels, all_preds)
 

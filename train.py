@@ -1,4 +1,8 @@
 import torch
+import numpy as np
+import torch.nn as nn
+
+from sklearn.utils.class_weight import compute_class_weight
 
 from config import (
     DEVICE,
@@ -11,7 +15,7 @@ from backbone.resnet50 import ResNet50Backbone
 from neck.bifpn import BiFPN
 from models.classifier import SteelClassifier
 
-from utils.loss import build_loss
+
 from utils.seed import set_seed
 from utils.checkpoint import save_checkpoint
 
@@ -38,6 +42,33 @@ def main():
     train_loader, val_loader, test_loader = get_dataloaders()
 
     # ----------------------
+    # Get labels from the training dataset
+    # ----------------------
+    labels = train_loader.dataset.targets
+
+    # ----------------------
+    # Compute balanced class weights
+    # ----------------------
+    weights = compute_class_weight(
+        class_weight="balanced",
+        classes=np.unique(labels),
+        y=labels
+    )
+
+    # ----------------------
+    # Convert to tensor
+    # ----------------------
+    class_weights = torch.tensor(
+        weights,
+        dtype=torch.float32,
+        device=DEVICE
+    )
+
+    print("\nClass Weights:")
+    for cls, w in zip(train_loader.dataset.classes, class_weights):
+        print(f"{cls:20s}: {w:.4f}")
+
+    # ----------------------
     # Model
     # ----------------------
     model = SteelClassifier(
@@ -48,7 +79,9 @@ def main():
     # ----------------------
     # Loss
     # ----------------------
-    criterion = build_loss()
+    criterion = nn.CrossEntropyLoss(
+      weight=class_weights
+  )
 
     # ----------------------
     # Optimizer
@@ -117,14 +150,7 @@ def main():
             best_acc = val_acc
 
             patience_counter = 0
-            save_checkpoint()
-        else:
-            patience_counter += 1
-
-        if patience_counter >= 8:
-            print("Early stopping.")
-            break
-
+          
             save_checkpoint(
                 {
                     "model": model.state_dict(),
@@ -136,6 +162,15 @@ def main():
             )
 
             print("✅ Best model saved!")
+
+            
+        else:
+            patience_counter += 1
+
+        if patience_counter >= 8:
+            print("Early stopping.")
+            break
+
 
     print("Training complete!")
 

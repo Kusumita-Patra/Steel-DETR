@@ -85,7 +85,9 @@ class Trainer:
 
             self.scaler.update()
 
-            running_loss += loss.item()
+            running_loss += loss.item() * labels.size(0)
+            
+            epoch_loss = running_loss / total
 
             preds = outputs.argmax(dim=1)
 

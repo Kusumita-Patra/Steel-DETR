@@ -3,6 +3,7 @@ import numpy as np
 import torch.nn as nn
 
 from sklearn.utils.class_weight import compute_class_weight
+from utils.loss import LabelSmoothingCrossEntropy
 
 from config import (
     DEVICE,
@@ -79,9 +80,10 @@ def main():
     # ----------------------
     # Loss
     # ----------------------
-    criterion = nn.CrossEntropyLoss(
-      weight=class_weights
-  )
+    criterion = LabelSmoothingCrossEntropy(
+    smoothing=0.1,
+    weight=class_weights
+)
 
     # ----------------------
     # Optimizer

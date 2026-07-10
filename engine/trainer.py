@@ -1,5 +1,6 @@
 import torch
 from tqdm import tqdm
+from utils.mixup import mixup_data, mixup_loss
 
 from config import (
     DEVICE,
@@ -40,6 +41,7 @@ class Trainer:
         self.model.train()
 
         running_loss = 0.0
+        num_batches = 0
 
         correct = 0
 
@@ -57,6 +59,15 @@ class Trainer:
 
             labels = labels.to(DEVICE)
 
+            # -------------------------
+            # MixUp
+            # -------------------------
+            images, labels_a, labels_b, lam = mixup_data(
+                images,
+                labels,
+                alpha=0.2
+            )
+
             self.optimizer.zero_grad()
 
             with torch.amp.autocast(
@@ -66,9 +77,12 @@ class Trainer:
 
                 outputs = self.model(images)
 
-                loss = self.criterion(
+                loss = mixup_loss(
+                    self.criterion,
                     outputs,
-                    labels
+                    labels_a,
+                    labels_b,
+                    lam
                 )
 
             self.scaler.scale(loss).backward()
@@ -85,12 +99,16 @@ class Trainer:
 
             self.scaler.update()
 
-            running_loss += loss.item() * labels.size(0)
+            running_loss += loss.item()
+            num_batches += 1
             
 
             preds = outputs.argmax(dim=1)
 
-            correct += (preds == labels).sum().item()
+            correct += (
+                lam * (preds == labels_a).sum().item()
+                + (1 - lam) * (preds == labels_b).sum().item()
+            )
 
             total += labels.size(0)
 
@@ -108,7 +126,7 @@ class Trainer:
 
             self.scheduler.step()
 
-        epoch_loss = running_loss / total
+        epoch_loss = running_loss / num_batches
 
         epoch_acc = correct / total
 

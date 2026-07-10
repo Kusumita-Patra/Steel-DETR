@@ -1,4 +1,5 @@
 import torch
+import torchvision.transforms.functional as TF
 import matplotlib.pyplot as plt
 
 from sklearn.metrics import (
@@ -37,7 +38,30 @@ with torch.no_grad():
 
         images = images.to(DEVICE)
 
-        outputs = model(images)
+        # Original prediction
+        logits1 = model(images)
+
+        # Horizontal Flip
+        logits2 = model(TF.hflip(images))
+
+        # Brightness slightly higher
+        bright = torch.clamp(images * 1.1, 0, 1)
+        logits3 = model(bright)
+
+        # Brightness slightly lower
+        dark = torch.clamp(images * 0.9, 0, 1)
+        logits4 = model(dark)
+
+        #Vertical Flip
+        logits5 = model(TF.vflip(images))
+
+        outputs = (
+            logits1 +
+            logits2 +
+            logits3 +
+            logits4 +
+            logits5
+        ) / 5
 
         preds = outputs.argmax(dim=1)
 
